@@ -62,7 +62,7 @@ class CNN(BaseModel):
             tmp = layers.concatenate([tmp,maxlist[i + 1]])
         flat = layers.Flatten()(tmp)
         dense = layers.Dense(20,activation = 'relu', kernel_regularizer = keras.regularizers.l2(0.01))(flat)
-        drop = layers.Drop(0.5)(dense)
+        drop = layers.Dropout(0.5)(dense)
         self.output = layers.Dense(8,activation = 'softmax')(drop)
         self.model = keras.models.Model(self.input,self.output)
 
