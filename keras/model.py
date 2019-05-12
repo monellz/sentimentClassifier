@@ -58,7 +58,7 @@ class CNN(BaseModel):
             tmp = layers.MaxPool1D(self.max_news_len - i + 1)(fr[i - 1])
             maxlist.append(tmp)
         tmp = layers.concatenate([maxlist[0],maxlist[1]])
-        for i in range(1,self.channels):
+        for i in range(1,self.channels - 1):
             tmp = layers.concatenate([tmp,maxlist[i + 1]])
         flat = layers.Flatten()(tmp)
         self.output = layers.Dense(8,activation = 'softmax')(flat)
