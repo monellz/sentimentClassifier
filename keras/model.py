@@ -69,7 +69,7 @@ class CNN(BaseModel):
         self.model.compile(optimizer = 'rmsprop',loss = 'categorical_crossentropy',metrics=['acc'])
         self.model.summary()
     def train(self):
-        self.model.fit(self.train_batch,self.train_label,epochs = 20, batch_size = 20)
+        self.model.fit(self.train_batch,self.train_label,epochs = 20, batch_size = 128,validation_split = 0.2)
         self.save("cnn-20ch-normal.h5")
 
         
