@@ -50,18 +50,21 @@ class CNN(BaseModel):
         self.input = keras.Input(shape = (self.max_news_len,))
         embed = layers.Embedding(self.token_num + 1,self.embed_size)(self.input)
         fr = []
+        '''
         for i in range(self.channels):
             c = layers.Conv1D(1,i + 1,activation = 'relu')(embed)
             fr.append(c)
+        '''
         maxlist = []
-        for i in range(1,self.channels + 1):
-            tmp = layers.MaxPool1D(self.max_news_len - i + 1)(fr[i - 1])
+        for i in range(3,6):
+            c = layers.Conv1D(100,i,activation = 'relu')(embed)
+            tmp = layers.MaxPool1D(self.max_news_len - i + 1)(c)
             maxlist.append(tmp)
         tmp = layers.concatenate([maxlist[0],maxlist[1]])
-        for i in range(1,self.channels - 1):
+        for i in range(1,len(maxlist) - 1):
             tmp = layers.concatenate([tmp,maxlist[i + 1]])
         flat = layers.Flatten()(tmp)
-        dense = layers.Dense(20,activation = 'relu', kernel_regularizer = keras.regularizers.l2(0.01))(flat)
+        dense = layers.Dense(300,activation = 'relu', kernel_regularizer = keras.regularizers.l2(3))(flat)
         drop = layers.Dropout(0.5)(dense)
         self.output = layers.Dense(8,activation = 'softmax')(drop)
         self.model = keras.models.Model(self.input,self.output)
@@ -69,7 +72,7 @@ class CNN(BaseModel):
         self.model.compile(optimizer = 'rmsprop',loss = 'categorical_crossentropy',metrics=['acc'])
         self.model.summary()
     def train(self):
-        self.model.fit(self.train_batch,self.train_label,epochs = 20, batch_size = 128,validation_split = 0.2)
-        self.save("cnn-20ch-normal.h5")
+        self.model.fit(self.train_batch,self.train_label,epochs = 20, batch_size = 50,validation_split = 0.1)
+        self.model.save("cnn-20ch-normal.h5")
 
         
