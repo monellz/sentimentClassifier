@@ -18,12 +18,9 @@ class AbstractFileWR(object):
 class AbstractModel(object):
     def __init__(self):
         #super parameters
-        self.lr = 0.1
         self.max_news_len = 2939
         self.embed_size = 300
     def create(self):
         pass 
     def train(self,train_list):
-        pass
-    def evaluate(self,test_list):
         pass
