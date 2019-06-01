@@ -12,6 +12,7 @@ from sklearn.decomposition import PCA
 from scipy.stats import pearsonr
 
 import matplotlib.pyplot as plt
+import pickle as pkl
 
 class BaseModel(AbstractModel):
     def __init__(self):
@@ -55,7 +56,7 @@ class BaseModel(AbstractModel):
             print('show type error!!')
 
 
-    def process(self,shuffle):
+    def process(self):
         train,test = genData()
         test_list_raw = genTestRaw()
         self.test_true_raw = np.zeros((len(test_list_raw),8))
@@ -64,8 +65,6 @@ class BaseModel(AbstractModel):
                 self.test_true_raw[i,j] = n
             self.test_true_raw[i] = self.test_true_raw[i] / np.sum(self.test_true_raw[i])
         
-        if shuffle:
-            random.shuffle(train)
         self.token_index = {}
         train_label = np.zeros((len(train),8))
         for i,obj in enumerate(train):
@@ -104,8 +103,8 @@ class BaseModel(AbstractModel):
                 self.w2v_matrix[v] = vec
             
         return (train_batch,train_label),(test_batch,test_label)
-    def batch(self,shuffle = True):
-        (self.train_batch,self.train_label), (self.test_batch,self.test_label) = self.process(shuffle)
+    def batch(self):
+        (self.train_batch,self.train_label), (self.test_batch,self.test_label) = self.process()
     def score(self):
         '''
         return: accuracy, f1-score-macro, f1-score-micro, coef
@@ -167,6 +166,29 @@ class SVM(AbstractModel):
     def evaluate(self):
         pass
 
+class MLP_bert(AbstractModel):
+    def batch(self):
+        train,test = genData()
+        self.train_batch = np.zeros((len(train),768))
+        self.train_label = np.zeros((len(train),8))
+        self.test_batch = np.zeros((len(test),768))
+        self.test_label = np.zeros((len(test),8))
+
+        self.s2v = pkl.load(open("s2v-bert.pkl","rb"))
+        for i,obj in enumerate(train):
+            self.train_label[i,obj[0]] = 1
+            s = ' '.join(obj[1])
+            vec = self.s2v[s]
+            self.train_batch[i] = vec
+        
+        for i,obj in enumerate(test):
+            self.test_label[i,obj[0]] = 1
+            s = ' '.join(obj[1])
+            vec = self.s2v[s]
+            self.test_batch[i] = vec
+            #14个batch(data)?
+            #4个batch(split)
+    
 class RNN(BaseModel):
     def __init__(self):
         BaseModel.__init__(self)
@@ -196,15 +218,15 @@ class MLP(BaseModel):
         self.model.add(layers.Embedding(self.token_num + 1, self.embed_size,input_length = self.max_news_len))
         #self.model.add(layers.Embedding(self.token_num + 1, 50,input_length = self.max_news_len))
         self.model.add(layers.Flatten())
-        self.model.add(layers.Dense(100,activation = 'relu',kernel_initializer = 'random_normal',bias_initializer = 'random_normal'))
+        self.model.add(layers.Dense(50,activation = 'relu',kernel_initializer = 'random_normal',bias_initializer = 'random_normal'))
         self.model.add(layers.Dense(8,activation = 'softmax',kernel_initializer = 'random_normal',bias_initializer = 'random_normal'))
         self.model.layers[0].set_weights([self.w2v_matrix])
-        self.model.layers[0].trainable = False
+        #self.model.layers[0].trainable = False
         self.model.compile(optimizer = 'adam',loss = 'categorical_crossentropy',metrics=['acc'])
         self.model.summary()
         self.plot('mlp.png')
     def train(self):
-        self.model.fit(self.train_batch,self.train_label,epochs = 30, batch_size = 20,validation_split = 0.1)
+        self.model.fit(self.train_batch,self.train_label,epochs = 33, batch_size = 20,validation_split = 0.1)
         #13个epochs  20batch_size 55%
         self.plot('mlp.h5')
     def run(self):
