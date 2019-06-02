@@ -4,8 +4,9 @@ import random
 from keras import layers
 from keras.utils import plot_model
 from keras import regularizers
+from keras.callbacks import ModelCheckpoint
 
-from genData import genData,genWord2Vec,genTestRaw
+from preprocess import genData,genWord2Vec,genTestRaw,genSen2Vec
 import numpy as np
 from sklearn import metrics,preprocessing,svm
 from sklearn.decomposition import PCA
@@ -20,9 +21,15 @@ class BaseModel(AbstractModel):
         self.token_num = 0
         self.w2v_matrix = None
         self.model = None
+        self.batch()
+    def load(self,fn):
+        #load model
+        self.model = keras.models.load_model(fn)
     def plot(self,fn):
+        #plot model structure
         plot_model(self.model,to_file = fn,show_shapes = True)
     def plot_result(self,history,show_type,fn):
+        #plot result of training
         plt.clf()
         if show_type == 'acc':
             acc = history.history['acc']
@@ -56,7 +63,8 @@ class BaseModel(AbstractModel):
             print('show type error!!')
 
 
-    def process(self):
+    def __process(self):
+        #preprocess data
         train,test = genData()
         test_list_raw = genTestRaw()
         self.test_true_raw = np.zeros((len(test_list_raw),8))
@@ -80,19 +88,24 @@ class BaseModel(AbstractModel):
             for w in obj[1]:
                 if w not in self.token_index.keys():
                     self.token_index[w] = len(self.token_index) + 1
+        self.token_num = len(self.token_index)
+
+        self.max_news_len = 400
+
         print("token len: ",len(self.token_index))
         print("max val: ",max(self.token_index.values()))
         print("max news len: ",self.max_news_len)
-        self.token_num = len(self.token_index)
 
         train_batch = np.zeros(shape = (len(train), self.max_news_len))
         test_batch = np.zeros(shape = (len(test), self.max_news_len))
         for i, news in enumerate(train):
             for j, w in enumerate(news[1]):
+                if j >= self.max_news_len: break
                 train_batch[i,j] = self.token_index[w]
                 #print(i,j,w)
         for i, news in enumerate(test):
             for j, w in enumerate(news[1]):
+                if j >= self.max_news_len: break
                 test_batch[i,j] = self.token_index[w]
         
         w2v_dict = genWord2Vec()
@@ -104,7 +117,7 @@ class BaseModel(AbstractModel):
             
         return (train_batch,train_label),(test_batch,test_label)
     def batch(self):
-        (self.train_batch,self.train_label), (self.test_batch,self.test_label) = self.process()
+        (self.train_batch,self.train_label), (self.test_batch,self.test_label) = self.__process()
     def score(self):
         '''
         return: accuracy, f1-score-macro, f1-score-micro, coef
@@ -120,7 +133,7 @@ class BaseModel(AbstractModel):
 
         ret = np.zeros((test_pred_raw.shape[0]))
         for i in range(len(test_pred_raw)):
-            ret[i] = pearsonr(test_pred_raw[i],self.test_true_raw[i])
+            ret[i] = pearsonr(test_pred_raw[i],self.test_true_raw[i])[0]
         coef = np.average(ret)
         return acc,f1_macro,f1_micro,coef
         
@@ -174,7 +187,7 @@ class MLP_bert(AbstractModel):
         self.test_batch = np.zeros((len(test),768))
         self.test_label = np.zeros((len(test),8))
 
-        self.s2v = pkl.load(open("s2v-bert.pkl","rb"))
+        self.s2v = genSen2Vec()
         for i,obj in enumerate(train):
             self.train_label[i,obj[0]] = 1
             s = ' '.join(obj[1])
@@ -186,51 +199,53 @@ class MLP_bert(AbstractModel):
             s = ' '.join(obj[1])
             vec = self.s2v[s]
             self.test_batch[i] = vec
-            #14个batch(data)?
-            #4个batch(split)
     
 class RNN(BaseModel):
     def __init__(self):
         BaseModel.__init__(self)
-
-    def create(self,rnn_num = 1,embed_fix = False):
+    def create(self,kernel_num = 40,embed_fix = True):
         self.model = keras.models.Sequential()
-        if embed_fix:
-            self.model.add(layers.Embedding(self.token_num + 1,self.embed_size,input_length = self.max_news_len))
-            self.model.layers[0].set_weights([self.w2v_matrix])
-            self.model.layers[0].trainable = False
-        else:
-            self.model.add(layers.Embedding(self.token_num + 1,50,input_length = self.max_news_len))
-        if rnn_num > 1:
-            for i in range(rnn_num - 1):
-                self.model.add(layers.SimpleRNN(50,return_sequences = True,activation = 'relu'))
-        #self.model.add(layers.SimpleRNN((100),activation = 'relu'))
-        self.model.add(layers.LSTM(100,activation = 'relu'))
+        self.model.add(layers.Embedding(self.token_num + 1,self.embed_size,input_length = self.max_news_len))
+        self.model.layers[0].set_weights([self.w2v_matrix])
+        if embed_fix: self.model.layers[0].trainable = False
+        self.model.add(layers.Bidirectional(layers.LSTM(kernel_num,kernel_initializer='he_normal',activation = 'relu',dropout = 0.2,recurrent_dropout = 0.2, return_sequences = True)))
+        self.model.add(layers.Flatten())
         self.model.add(layers.Dense(8,activation = 'softmax'))
-        self.model.compile(optimizer = 'adam',loss = 'categorical_crossentropy',metrics=['acc'])
+
+        #self.model.compile(optimizer = 'adam',loss = 'categorical_crossentropy',metrics=['acc'])
+        self.model.compile(optimizer = 'adam',loss = 'mean_squared_logarithmic_error',metrics=['acc'])
         self.model.summary()
+    def train(self):
+        checkpoint = ModelCheckpoint("rnn-40bi-fix.h5",monitor = 'val_acc', verbose = 2, save_best_only = True, mode = 'max', save_weights_only = False)
+        callbacks_list = [checkpoint]
+        self.model.fit(self.train_batch,self.train_label,epochs = 15, batch_size = 50,validation_split = 0.1,callbacks = callbacks_list)
+    def run(self):
+        self.create()
+        self.train()
+
         
 class MLP(BaseModel):
     def __init__(self):
         BaseModel.__init__(self)
-    def create(self):
-        self.model = keras.models.Sequential()
-        self.model.add(layers.Embedding(self.token_num + 1, self.embed_size,input_length = self.max_news_len))
-        #self.model.add(layers.Embedding(self.token_num + 1, 50,input_length = self.max_news_len))
-        self.model.add(layers.Flatten())
-        self.model.add(layers.Dense(50,activation = 'relu',kernel_initializer = 'random_normal',bias_initializer = 'random_normal'))
-        self.model.add(layers.Dense(8,activation = 'softmax',kernel_initializer = 'random_normal',bias_initializer = 'random_normal'))
-        self.model.layers[0].set_weights([self.w2v_matrix])
-        #self.model.layers[0].trainable = False
+    def create(self,kernel_num = 50, fix = True):
+        self.input = keras.Input(shape = (self.max_news_len,))
+        embed = layers.Embedding(self.token_num + 1,self.embed_size,name = 'embed_unfix',weights = [self.w2v_matrix],trainable = not fix)(self.input)
+        embed_unfix = layers.Embedding(self.token_num + 1,self.embed_size,name = 'embed_fix')(self.input)
+        out = layers.Concatenate()([embed,embed_unfix])
+        out = layers.Flatten()(out)
+        out = layers.Dense(kernel_num,activation = 'relu')(out)
+        self.output = layers.Dense(8,activation = 'softmax')(out)
+        self.model = keras.models.Model(self.input,self.output)
+
         self.model.compile(optimizer = 'adam',loss = 'categorical_crossentropy',metrics=['acc'])
+        #self.model.compile(optimizer = 'adam',loss = 'mean_squared_logarithmic_error',metrics=['acc'])
         self.model.summary()
-        self.plot('mlp.png')
     def train(self):
-        self.model.fit(self.train_batch,self.train_label,epochs = 33, batch_size = 20,validation_split = 0.1)
-        #13个epochs  20batch_size 55%
-        self.plot('mlp.h5')
+        checkpoint = ModelCheckpoint("mlp-50-fix.h5",monitor = 'val_acc', verbose = 2, save_best_only = True, mode = 'max', save_weights_only = False)
+        callbacks_list = [checkpoint]
+        self.model.fit(self.train_batch,self.train_label,epochs = 18, batch_size = 20,validation_split = 0.1,callbacks = callbacks_list)
+
     def run(self):
-        self.batch()
         self.create()
         self.train()
  
@@ -238,39 +253,38 @@ class MLP(BaseModel):
 class CNN(BaseModel):
     def __init__(self):
         BaseModel.__init__(self)
-    def create(self):
+    def create(self,filter_num = 150, fix = True):
         self.input = keras.Input(shape = (self.max_news_len,))
         embed = layers.Embedding(self.token_num + 1,self.embed_size,name = 'embed_unfix',embeddings_initializer = 'random_normal')(self.input)
         embed_unfix = layers.Embedding(self.token_num + 1,self.embed_size,name = 'embed_fix')(self.input)
-        embed_out = layers.Add()([embed_unfix,embed])
-        dropout = layers.Dropout(0.5)(embed_out)
         conv_blocks = []
         for sz in (3,4,5):
-            conv = layers.Conv1D(filters = 200,kernel_size = sz,padding = 'valid',activation = 'relu',kernel_regularizer = regularizers.l2(0.01),bias_regularizer = regularizers.l2(0.01),activity_regularizer = regularizers.l2(0.01))(dropout)
-            conv = layers.GlobalMaxPooling1D()(conv)
+            conv = layers.Conv1D(filters = filter_num,kernel_size = sz,padding = 'same',activation = 'relu')(embed)
+            conv = layers.MaxPooling1D(pool_size = self.max_news_len - sz + 1)(conv)
             conv_blocks.append(conv)
-            #conv = layers.Conv1D(filters = 200,kernel_size = sz,padding = 'valid',activation = 'relu',kernel_regularizer = regularizers.l2(0.01),bias_regularizer = regularizers.l2(0.01),activity_regularizer = regularizers.l2(0.01))(embed_unfix)
-            #conv = layers.GlobalMaxPooling1D()(conv)
-            #conv_blocks.append(conv)
+            conv = layers.Conv1D(filters = filter_num,kernel_size = sz,padding = 'same',activation = 'relu')(embed_unfix)
+            conv = layers.MaxPooling1D(pool_size = self.max_news_len - sz + 1)(conv)
+            conv_blocks.append(conv)
 
         z = layers.Concatenate()(conv_blocks)
-        z = layers.Activation("relu")(z)
-
-        z = layers.Dropout(0.5)(z)
+        z = layers.Flatten()(z)
+        z = layers.Dropout(0.2)(z)
         self.output = layers.Dense(8,activation = 'softmax')(z)
         self.model = keras.models.Model(self.input,self.output)
+
         layer = self.model.get_layer('embed_fix')
         layer.set_weights([self.w2v_matrix])
-        layer.trainable = False
+        if fix: layer.trainable = False
 
-        self.model.compile(optimizer = 'adam',loss = 'categorical_crossentropy',metrics=['acc'])
+        #self.model.compile(optimizer = 'adam',loss = 'categorical_crossentropy',metrics=['acc'])
+        self.model.compile(optimizer = 'adam',loss = 'mean_squared_logarithmic_error',metrics=['acc'])
         self.model.summary()
-        self.plot('cnn.png')
     def train(self):
-        #self.model.fit(self.train_batch,self.train_label,epochs = 50, batch_size = 20,validation_split = 0.1)
-        self.batch()
+        checkpoint = ModelCheckpoint("cnn-150-fix.h5",monitor = 'val_acc', verbose = 2, save_best_only = True, mode = 'max', save_weights_only = False)
+        callbacks_list = [checkpoint]
+        self.model.fit(self.train_batch,self.train_label,epochs = 40, batch_size = 50,validation_split = 0.1,callbacks = callbacks_list)
+    def run(self):
         self.create()
-        self.model.fit(self.train_batch,self.train_label,epochs = 20, batch_size = 20,validation_data = (self.test_batch,self.test_label)) 
-        #self.model.save("cnn-unfix.h5")
+        self.train()
 
         
